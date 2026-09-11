@@ -1,0 +1,22 @@
+# Build artifacts
+*.astraplugin
+
+__pycache__/
+*.pyc
+.venv/
+.tmp-*/
+.pytest_cache/
+
+# Local models (vosk, faster-whisper) — скачиваются отдельно
+models/
+data/
+
+# The standalone desktop app lives in its own repo (Voltur792/VoiceTyper)
+app/
+dist/
+build/
+voice-typer.spec
+requirements-app.txt
+
+# Internal memo, not part of the published plugin
+AGENTS.md

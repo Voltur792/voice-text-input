@@ -1,0 +1,31 @@
+[plugin]
+id = "voice-text-input"
+name = "Voice Text Input"
+version = "1.0.0"
+description = "Voice typing into any focused window: a start word begins dictation, text is typed as you speak, a send word presses Enter. Configurable command words, fully local."
+author = "Voltur"
+license = "MIT"
+
+[entry]
+# `python` — известный демону рантайм: Астра сама находит Python (или
+# предложит установить), создаёт виртуальное окружение плагина из
+# requirements.lock и запускает код в нём. Это единственная форма, которую
+# принимает бандл .astraplugin (пути вида .venv/... в него не попадают).
+command = "python"
+args = ["-m", "src.plugin"]
+runtimes = ["python"]
+
+# tools — вкл/выкл и статус диктовки для ИИ Astra; stt — плагин может служить
+# распознавателем для самой Astra (тогда одна модель обслуживает всё).
+[capabilities]
+tools = true
+stt = true
+
+[permissions]
+
+[config]
+schema = "{ \"type\": \"object\", \"properties\": { \"enabled\": { \"type\": \"boolean\", \"default\": true, \"title\": \"Включено\", \"description\": \"Прослушивание микрофона и диктовка\" }, \"start_word\": { \"type\": \"string\", \"default\": \"напиши\", \"title\": \"Слово начала диктовки\" }, \"send_word\": { \"type\": \"string\", \"default\": \"отправить\", \"title\": \"Слово отправки\", \"description\": \"Enter; набор продолжается, пока не сказано слово завершения\" }, \"finish_word\": { \"type\": \"string\", \"default\": \"закончить\", \"title\": \"Слово завершения\", \"description\": \"Enter и конец диктовки. Очистите, чтобы «отправить» сразу завершала\" }, \"cancel_word\": { \"type\": \"string\", \"default\": \"отмена\", \"title\": \"Слово отмены (стирает набранное)\" }, \"new_line_word\": { \"type\": \"string\", \"default\": \"с новой строки\", \"title\": \"Слово переноса строки\", \"description\": \"Вставляет перенос строки (в мессенджерах не отправляет). Очистите, чтобы выключить\" }, \"wake_words\": { \"type\": \"string\", \"default\": \"астра\", \"title\": \"Wake-слова перед командным\", \"description\": \"Через запятую: астра, окей астра. Отрезаются от начала фразы перед поиском командного слова\" }, \"engine\": { \"type\": \"string\", \"enum\": [\"faster-whisper\", \"vosk\", \"yandex\", \"openai\", \"google\"], \"default\": \"faster-whisper\", \"title\": \"Движок распознавания\", \"description\": \"faster-whisper — локально, качественно; yandex/openai/google — облако (нужен API-ключ); vosk — только офлайн, легче\" }, \"whisper_model\": { \"type\": \"string\", \"enum\": [\"tiny\", \"base\", \"small\"], \"default\": \"small\", \"title\": \"Модель Whisper\" }, \"yandex_api_key\": { \"type\": \"string\", \"default\": \"\", \"title\": \"API-ключ Яндекс SpeechKit\", \"description\": \"Для движка yandex: Api-Key сервисного аккаунта Yandex Cloud (или IAM-токен)\" }, \"yandex_lang\": { \"type\": \"string\", \"default\": \"ru-RU\", \"title\": \"Язык SpeechKit\" }, \"openai_api_key\": { \"type\": \"string\", \"default\": \"\", \"title\": \"API-ключ OpenAI\", \"description\": \"Для движка openai: ключ OpenAI или совместимого сервиса (Groq и др.)\" }, \"openai_base_url\": { \"type\": \"string\", \"default\": \"https://api.openai.com/v1\", \"title\": \"OpenAI-совместимый сервер\", \"description\": \"Base URL аудио-API (можно указать Groq или локальный сервер)\" }, \"openai_model\": { \"type\": \"string\", \"default\": \"whisper-1\", \"title\": \"Модель OpenAI\", \"description\": \"whisper-1, gpt-4o-mini-transcribe или модель сервера\" }, \"google_api_key\": { \"type\": \"string\", \"default\": \"\", \"title\": \"API-ключ Google Cloud STT\", \"description\": \"Для движка google: ключ Google Cloud Speech-to-Text\" }, \"send_key\": { \"type\": \"string\", \"enum\": [\"enter\", \"ctrl+enter\"], \"default\": \"enter\", \"title\": \"Клавиша отправки\" }, \"corrections\": { \"type\": \"boolean\", \"default\": true, \"title\": \"Уточнение текста после пауз\", \"description\": \"Перепроверка сегментов движком качества (whisper или облако)\" }, \"send_wait_secs\": { \"type\": \"number\", \"default\": 1.2, \"title\": \"Ожидание коррекции перед отправкой, с\", \"description\": \"0 — отправлять мгновенно\" } } }"
+
+[platform]
+os = ["windows"]
+arch = ["x86_64"]

@@ -1,0 +1,8 @@
+astra-plugin-sdk>=0.6,<0.7
+grpcio>=1.60.0
+grpcio-tools>=1.60.0
+protobuf>=4.25.0
+numpy>=1.26
+sounddevice>=0.4.6
+vosk>=0.3.45
+faster-whisper>=1.0
