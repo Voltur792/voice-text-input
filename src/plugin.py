@@ -10,6 +10,7 @@ autonomous background process that Astra merely hosts. Everything is driven
 from the Astra settings page rendered out of `[config]` in plugin.toml.
 """
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -17,6 +18,7 @@ from pathlib import Path
 from astra_plugin_sdk import Plugin, tool
 from astra_plugin_sdk.types import SttLoadState, SttLoadStatus
 
+from . import deps
 from .dictation import DictationEngine
 from .settings import ENGINE_WHISPER, Settings
 from .stt_provider import SttProvider
@@ -89,7 +91,9 @@ class VoiceTextInput(Plugin):
     async def stt_load(self, model_path: str, use_gpu: bool) -> None:
         # The daemon's model catalog path does not apply here: models live in
         # the plugin's models/ dir. Just warm the active engine so the first
-        # utterance is not slow.
+        # utterance is not slow. Self-heal deps first: Astra's runtime python
+        # may miss vosk/faster-whisper (partial install) — this finishes it.
+        await asyncio.to_thread(deps.ensure_core_deps)
         if self._engine.settings.engine == ENGINE_WHISPER:
             self._engine.whisper_engine().warm_up()
         else:

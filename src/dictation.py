@@ -34,6 +34,7 @@ from pathlib import Path
 import numpy as np
 
 from .audio import TARGET_SR, MicCapture
+from . import deps
 from .engines import WhisperEngine
 from .listener import VoskListener
 from .settings import (
@@ -134,6 +135,8 @@ class DictationEngine:
         self._vosk: VoskListener | None = None
         self._rec = None
         self._vosk_failed_at = 0.0
+        self._last_vosk_err: str | None = None
+        self._last_vosk_err_at = 0.0
         self._whisper: WhisperEngine | None = None
         self._yandex = None
         self._yandex_key_seen: str | None = None
@@ -295,7 +298,6 @@ class DictationEngine:
             self._status = "disabled"
             return
         if not self._ensure_vosk():
-            self._status = "vosk model missing (see models/)"
             return
         self._start_mic()
         if s.engine == ENGINE_WHISPER and s.corrections:
@@ -311,10 +313,19 @@ class DictationEngine:
     def _ensure_vosk(self) -> bool:
         if self._vosk is not None:
             return True
+        if deps.missing_core():
+            self._status = "installing dependencies (one-time, see logs)…"
+        if not deps.ensure_core_deps():
+            self._vosk_failed_at = time.monotonic()
+            self._log_vosk_failure_once("vosk module unavailable — dependency "
+                                        "install failed (see earlier logs)")
+            self._status = "vosk unavailable (dependency install failed)"
+            return False
         candidates = sorted(self.models_dir.glob("vosk-model*ru*"))
         if not candidates:
             self._vosk_failed_at = time.monotonic()
             log.warning("vosk model not found in %s", self.models_dir)
+            self._status = "vosk model missing (see models/)"
             return False
         try:
             self._vosk = VoskListener(candidates[0])
@@ -322,8 +333,17 @@ class DictationEngine:
             return True
         except Exception as exc:
             self._vosk_failed_at = time.monotonic()
-            log.error("vosk load failed: %s", exc)
+            self._log_vosk_failure_once(f"vosk load failed: {exc}")
             return False
+
+    def _log_vosk_failure_once(self, message: str) -> None:
+        """The retry loop calls this every VOSK_RETRY_SECS — log each distinct
+        message immediately, repeats at most once a minute."""
+        now = time.monotonic()
+        if message != self._last_vosk_err or now - self._last_vosk_err_at > 60:
+            log.error(message)
+            self._last_vosk_err = message
+            self._last_vosk_err_at = now
 
     def _start_mic(self) -> None:
         if self._mic is not None:
