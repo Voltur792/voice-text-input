@@ -93,11 +93,13 @@ class VoiceTextInput(Plugin):
         # the plugin's models/ dir. Just warm the active engine so the first
         # utterance is not slow. Self-heal deps first: Astra's runtime python
         # may miss vosk/faster-whisper (partial install) — this finishes it.
+        # to_thread: on a fresh catalog install this may download the vosk
+        # model (~45 MB) or load whisper — minutes, must not block the loop.
         await asyncio.to_thread(deps.ensure_core_deps)
         if self._engine.settings.engine == ENGINE_WHISPER:
-            self._engine.whisper_engine().warm_up()
+            await asyncio.to_thread(self._engine.whisper_engine().warm_up)
         else:
-            self._engine.vosk_listener()
+            await asyncio.to_thread(self._engine.vosk_listener)
 
     async def stt_unload(self) -> None:
         # The Vosk model stays resident on purpose: the dictation engine shares

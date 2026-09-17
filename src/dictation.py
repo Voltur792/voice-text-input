@@ -35,6 +35,7 @@ import numpy as np
 
 from .audio import TARGET_SR, MicCapture
 from . import deps
+from . import models
 from .engines import WhisperEngine
 from .listener import VoskListener
 from .settings import (
@@ -121,7 +122,6 @@ class TypedTail:
 class DictationEngine:
     def __init__(self, plugin_root: Path):
         self.plugin_root = Path(plugin_root)
-        self.models_dir = self.plugin_root / "models"
         self.settings = Settings()
         self.settings_seen = False
 
@@ -321,14 +321,21 @@ class DictationEngine:
                                         "install failed (see earlier logs)")
             self._status = "vosk unavailable (dependency install failed)"
             return False
-        candidates = sorted(self.models_dir.glob("vosk-model*ru*"))
-        if not candidates:
+        # The .astraplugin bundle ships no models: a fresh catalog install
+        # has an empty plugin folder. Look in the plugin's models/ (sideload)
+        # and the shared per-user dir; download once if neither has one.
+        model = models.find_vosk_model(self.plugin_root)
+        if model is None:
+            self._status = "downloading vosk model (one-time, ~45 MB)…"
+            model = models.download_vosk_model(models.download_dir(self.plugin_root))
+        if model is None:
             self._vosk_failed_at = time.monotonic()
-            log.warning("vosk model not found in %s", self.models_dir)
-            self._status = "vosk model missing (see models/)"
+            self._log_vosk_failure_once("vosk model not found and the download "
+                                        "failed (see earlier logs)")
+            self._status = "vosk model missing (download failed, see logs)"
             return False
         try:
-            self._vosk = VoskListener(candidates[0])
+            self._vosk = VoskListener(model)
             self._rec = self._vosk.new_recognizer()
             return True
         except Exception as exc:
@@ -672,7 +679,11 @@ class DictationEngine:
 
     def _get_whisper(self) -> WhisperEngine:
         if self._whisper is None:
-            self._whisper = WhisperEngine(self.models_dir, self.settings.whisper_model)
+            # models_home: an already populated plugin models/ keeps its HF
+            # cache; a fresh catalog install caches in the shared dir, which
+            # survives plugin updates (the folder is wiped on every update).
+            self._whisper = WhisperEngine(
+                models.models_home(self.plugin_root), self.settings.whisper_model)
         return self._whisper
 
     def _whisper_loop(self) -> None:
