@@ -11,8 +11,17 @@ Two fixes live here:
 * when no vosk model exists anywhere, it is downloaded once (~45 MB from
   alphacephei.com — the same source the standalone app uses) into the shared
   dir. Runs from a worker thread (the dictation orchestrator is one).
+
+A third, Windows-specific trap lives here too: vosk hands the model path to
+Kaldi as UTF-8 while Kaldi opens the files through the ANSI codepage, so any
+non-ASCII character in the path (a Cyrillic user profile,
+"C:/Users/Максим/…") fails Model() with "Failed to create a model" even
+though every file is present. vosk_load_path() turns such a path into its
+pure-ASCII 8.3 short form (same folder), or copies the model under
+ProgramData when the volume has 8.3 names disabled.
 """
 
+import ctypes
 import logging
 import os
 import shutil
@@ -57,6 +66,65 @@ def looks_like_vosk_model(path: Path) -> bool:
     return ((path / "conf" / "model.conf").is_file()
             and (path / "am").is_dir()
             and (path / "graph").is_dir())
+
+
+def _windows_short_path(path: Path) -> Path | None:
+    """The8.3 short form of a path (pure ASCII), or None if unavailable."""
+    try:
+        buf = ctypes.create_unicode_buffer(4096)
+        n = ctypes.windll.kernel32.GetShortPathNameW(str(path), buf, len(buf))
+        if 0 < n < len(buf) and buf.value.isascii():
+            return Path(buf.value)
+    except Exception:
+        pass
+    return None
+
+
+def _programdata_dir() -> Path | None:
+    """An always-ASCII copy destination, or None. ProgramData never contains
+    the user's name, so it stays ASCII whatever the profile folder is."""
+    pd = os.environ.get("ProgramData")
+    if pd and pd.isascii():
+        return Path(pd)
+    return None
+
+
+def _is_windows() -> bool:
+    """os.name behind a seam: tests monkeypatch this, never os.name itself
+    (patching os.name globally breaks pathlib for the whole pytest run)."""
+    return os.name == "nt"
+
+
+def vosk_load_path(model: Path) -> Path:
+    """A path vosk's Model() can actually open on Windows.
+
+    Kaldi opens model files through the system ANSI codepage while vosk
+    passes the path as UTF-8: one non-ASCII character (a Cyrillic profile
+    folder) is enough for "Failed to create a model". The 8.3 short name of
+    the same folder is pure ASCII and loads fine; a volume with 8.3 names
+    disabled gets a one-time model copy under ProgramData.
+    """
+    model = Path(model)
+    if not _is_windows() or str(model).isascii():
+        return model
+    short = _windows_short_path(model)
+    if short is not None and str(short).isascii():
+        return short
+    programdata = _programdata_dir()
+    if programdata is not None:
+        name = model.name if model.name.isascii() else "vosk-model"
+        target = programdata / "voice-text-input" / "models" / name
+        if not looks_like_vosk_model(target):
+            try:
+                shutil.rmtree(target, ignore_errors=True)
+                shutil.copytree(model, target)
+            except Exception as exc:
+                log.error("could not copy the vosk model to an ASCII path "
+                          "(%s): %s", target, exc)
+                return model
+        if looks_like_vosk_model(target):
+            return target
+    return model  # nothing worked — let vosk fail with its own message
 
 
 def find_vosk_model(plugin_root: Path) -> Path | None:

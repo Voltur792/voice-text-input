@@ -1,7 +1,7 @@
 [plugin]
 id = "voice-text-input"
 name = "Voice Text Input"
-version = "1.0.2"
+version = "1.0.3"
 description = "Voice typing into any focused window: a start word begins dictation, text is typed as you speak, a send word presses Enter. Configurable command words, fully local."
 author = "Voltur"
 license = "MIT"

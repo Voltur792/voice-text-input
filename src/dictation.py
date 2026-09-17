@@ -335,7 +335,10 @@ class DictationEngine:
             self._status = "vosk model missing (download failed, see logs)"
             return False
         try:
-            self._vosk = VoskListener(model)
+            # vosk_load_path: on Windows Kaldi opens model files through the
+            # ANSI codepage — a non-ASCII path (Cyrillic user profile) fails
+            # with "Failed to create a model" although the files are there.
+            self._vosk = VoskListener(models.vosk_load_path(model))
             self._rec = self._vosk.new_recognizer()
             return True
         except Exception as exc:

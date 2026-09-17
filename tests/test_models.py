@@ -8,6 +8,7 @@ whisper HF cache in a place that survives plugin updates.
 
 import io
 import zipfile
+from pathlib import Path
 
 import src.dictation as dictation
 from src import models
@@ -191,6 +192,67 @@ def test_download_second_call_after_success_reuses_model(tmp_path, monkeypatch):
     assert len(calls) == 1  # the second call reused the downloaded model
 
 
+# ── vosk_load_path: non-ASCII paths on Windows ─────────────────────────────
+# _is_windows() is the seam: os.name must never be patched globally (it
+# breaks pathlib for the whole pytest run).
+
+def test_vosk_load_path_non_windows_passthrough(monkeypatch):
+    monkeypatch.setattr(models, "_is_windows", lambda: False)
+    p = Path("C:/Максим/models/vosk-model-small-ru-0.22")
+    assert models.vosk_load_path(p) == p
+
+
+def test_vosk_load_path_ascii_unchanged(monkeypatch):
+    monkeypatch.setattr(models, "_is_windows", lambda: True)
+    monkeypatch.setattr(models, "_windows_short_path",
+                        lambda p: (_ for _ in ()).throw(AssertionError(
+                            "must not touch short paths for an ASCII path")))
+    p = Path("C:/models/vosk-model-small-ru-0.22")
+    assert models.vosk_load_path(p) == p
+
+
+def test_vosk_load_path_uses_short_path(monkeypatch):
+    monkeypatch.setattr(models, "_is_windows", lambda: True)
+    monkeypatch.setattr(models, "_windows_short_path",
+                        lambda p: Path("C:/2BA0~1/VOICE-~1/VOSK-M~1.22"))
+    p = Path("C:/Максим/models/vosk-model-small-ru-0.22")
+    assert models.vosk_load_path(p) == Path("C:/2BA0~1/VOICE-~1/VOSK-M~1.22")
+
+
+def test_vosk_load_path_no_short_names_copies_to_programdata(tmp_path, monkeypatch):
+    """8.3 names disabled on the volume — the model is copied once to an
+    ASCII location and loaded from there."""
+    monkeypatch.setattr(models, "_is_windows", lambda: True)
+    monkeypatch.setattr(models, "_windows_short_path", lambda p: None)
+    monkeypatch.setattr(models, "_programdata_dir", lambda: tmp_path / "PD")
+    src = tmp_path / "src" / "vosk-model-small-ru-0.22"
+    _make_model(src)
+    target = tmp_path / "PD" / "voice-text-input" / "models" / "vosk-model-small-ru-0.22"
+    assert models.vosk_load_path(src) == target
+    assert models.looks_like_vosk_model(target)
+
+
+def test_vosk_load_path_no_short_names_no_programdata(monkeypatch):
+    """Nothing ASCII available — return the original path and let vosk
+    fail with its own (logged) message."""
+    monkeypatch.setattr(models, "_is_windows", lambda: True)
+    monkeypatch.setattr(models, "_windows_short_path", lambda p: None)
+    monkeypatch.setattr(models, "_programdata_dir", lambda: None)
+    p = Path("C:/Максим/models/vosk-model-small-ru-0.22")
+    assert models.vosk_load_path(p) == p
+
+
+def test_vosk_load_path_short_path_is_ascii_only(monkeypatch):
+    """A short path that still carries non-ASCII (8.3 mangled only part of
+    it) must be rejected, not handed to vosk."""
+    monkeypatch.setattr(models, "_is_windows", lambda: True)
+    monkeypatch.setattr(models, "_windows_short_path",
+                        lambda p: Path("C:/2BA0~1/модели/VOSK-M~1.22"))
+    monkeypatch.setattr(models, "_programdata_dir", lambda: None)
+    p = Path("C:/Максим/models/vosk-model-small-ru-0.22")
+    assert models.vosk_load_path(p) == p
+
+
 # ── dictation wiring: _ensure_vosk ─────────────────────────────────────────
 
 class _FakeVosk:
@@ -220,6 +282,10 @@ def test_ensure_vosk_downloads_model_on_fresh_catalog_install(tmp_path, monkeypa
     downloaded = tmp_path / "shared" / "vosk-model-small-ru-0.22"
     monkeypatch.setattr(models, "shared_models_dir", lambda: tmp_path / "shared")
     monkeypatch.setattr(models, "find_vosk_model", lambda root: None)
+    # tmp_path can be non-ASCII (Cyrillic profile) — the real vosk_load_path
+    # would turn it into an 8.3 short form; identity keeps the test about
+    # the download wiring, not about path mangling (covered above).
+    monkeypatch.setattr(models, "vosk_load_path", lambda p: p)
 
     def fake_download(dest):
         assert dest == tmp_path / "shared"  # must survive plugin updates
@@ -236,6 +302,7 @@ def test_ensure_vosk_uses_existing_model_without_downloading(tmp_path, monkeypat
     eng = bare_engine(tmp_path)
     existing = tmp_path / "shared" / "vosk-model-small-ru-0.22"
     monkeypatch.setattr(models, "find_vosk_model", lambda root: existing)
+    monkeypatch.setattr(models, "vosk_load_path", lambda p: p)
 
     def no_download(dest):
         raise AssertionError("must not download when a model exists")
