@@ -15,7 +15,6 @@ from src.textproc import (  # noqa: E402
     similar,
     strip_trailing_word,
     strip_session_head,
-    strip_wake_words,
 )
 
 
@@ -95,47 +94,32 @@ def test_capitalize_sentences():
     assert capitalize_sentences("привет. мир!") == "Привет. Мир!"
 
 
-def test_strip_wake_words_removes_the_wake_word():
-    out = strip_wake_words("астра напиши привет", ["астра"])
-    assert out == "напиши привет"
+def test_no_wake_words_anymore():
+    """1.1.0 dropped wake words: "Астра" is Astra's own cue, not ours.
+
+    A hypothesis that begins with an address must NOT match the start word —
+    the plugin stays out of the assistant's way.
+    """
+    matched, _skip = match_start("астра напиши привет", "напиши")
+    assert not matched
 
 
-def test_strip_wake_words_fuzzy_and_multiword():
-    assert strip_wake_words("астрам напиши", ["астра"]) == "напиши"
-    assert strip_wake_words("окей астра напиши", ["астра", "окей астра"]) == "напиши"
-
-
-def test_strip_wake_words_keeps_mid_sentence():
-    assert strip_wake_words("напиши астра летит", ["астра"]) == "напиши астра летит"
-
-
-def test_strip_wake_words_empty_input_and_list():
-    assert strip_wake_words("", ["астра"]) == ""
-    assert strip_wake_words("астра напиши", []) == "астра напиши"
-
-
-def test_match_start_after_wake_word():
-    candidate = strip_wake_words("астра напиши привет", ["астра"])
-    matched, skip = match_start(candidate, "напиши")
-    assert matched and skip == 1
-
-
-def test_strip_session_head_removes_wake_and_command():
-    out = strip_session_head("Астра, напиши привет", ["астра"], "напиши", "привет")
+def test_strip_session_head_removes_the_command_word():
+    out = strip_session_head("напиши привет", "напиши", "привет")
     assert out == "привет"
 
 
-def test_strip_session_head_without_wake():
-    out = strip_session_head("напиши привет как дела", [], "напиши", "")
+def test_strip_session_head_without_command_word():
+    out = strip_session_head("привет как дела", "напиши", "")
     assert out == "привет как дела"
 
 
 def test_strip_session_head_keeps_legit_dictation():
     # Vosk typed the same first word the correction starts with — the head is
     # real dictation ("написал маме…"), not the command word.
-    out = strip_session_head("написал маме привет", ["астра"], "напиши", "написал")
+    out = strip_session_head("написал маме привет", "напиши", "написал")
     assert out == "написал маме привет"
 
 
 def test_strip_session_head_empty():
-    assert strip_session_head("", ["астра"], "напиши", "") == ""
+    assert strip_session_head("", "напиши", "") == ""

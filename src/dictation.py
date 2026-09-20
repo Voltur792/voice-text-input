@@ -54,7 +54,6 @@ from .textproc import (
     strip_leading_word,
     strip_session_head,
     strip_trailing_word,
-    strip_wake_words,
 )
 from .typer import backspace, press_enter, press_shift_enter, type_text
 
@@ -138,6 +137,11 @@ class DictationEngine:
         self._last_vosk_err: str | None = None
         self._last_vosk_err_at = 0.0
         self._whisper: WhisperEngine | None = None
+        # Set when faster-whisper cannot be installed (it is not part of the
+        # core dependency set anymore): segments then get the offline Vosk
+        # polish instead of a quality re-transcription, without per-segment
+        # import errors in the log.
+        self._whisper_unavailable = False
         self._yandex = None
         self._yandex_key_seen: str | None = None
         self._openai = None
@@ -251,6 +255,17 @@ class DictationEngine:
         if cloud is not None:
             return cloud.transcribe(pcm)
         return self._get_whisper().transcribe(pcm, language)
+
+    def _quality_available(self) -> bool:
+        """Can segments be re-transcribed at all right now?
+
+        Cloud engines need only a key (stdlib/network), local whisper needs
+        the optional faster-whisper package — when its install failed, the
+        caller polishes segments offline with Vosk text instead.
+        """
+        if self.cloud_engine() is not None:
+            return True
+        return not self._whisper_unavailable
 
     # ── orchestrator thread ──────────────────────────────────────────────
 
@@ -404,12 +419,12 @@ class DictationEngine:
             self._try_start(partial)
 
     def _try_start(self, partial: str) -> None:
-        # The user may address Astra first ("Астра напиши") — wake words go.
-        candidate = strip_wake_words(partial, self.settings.wake_word_list)
-        matched, skip = match_start(candidate, self.settings.start_word)
+        # No wake-word handling: "Астра, напиши…" is Astra's own cue and is
+        # hers to answer. The plugin starts on its command word alone.
+        matched, skip = match_start(partial, self.settings.start_word)
         if not matched:
             return
-        remainder = candidate.split()[skip:]
+        remainder = partial.split()[skip:]
         self._begin_session()
         log.info("dictation started")
         self._type_delta(remainder)
@@ -444,16 +459,14 @@ class DictationEngine:
     def _leading_words(self, text: str) -> list[str]:
         """Words of a hypothesis with the session head stripped.
 
-        The first segment's audio begins with the wake/command words that
-        started the session, so EVERY hypothesis of that segment (partial and
-        final alike) carries them at its head — strip on every call, not just
-        once. (Stripping only once let the segment's final re-add "напиши",
-        and the tail diff then typed the command word into the window.)
+        The first segment's audio begins with the command word that started
+        the session, so EVERY hypothesis of that segment (partial and final
+        alike) carries it at its head — strip on every call, not just once.
+        (Stripping only once let the segment's final re-add "напиши", and the
+        tail diff then typed the command word into the window.)
         """
         words = text.split()
         if self.first_segment:
-            words = strip_wake_words(
-                " ".join(words), self.settings.wake_word_list).split()
             matched, skip = match_start(" ".join(words), self.settings.start_word)
             if matched:
                 words = words[skip:]
@@ -539,13 +552,16 @@ class DictationEngine:
         self.first_segment = False
         self.seg_submitted = True
 
-        if self.settings.engine == ENGINE_VOSK or not self.settings.corrections:
+        if (self.settings.engine == ENGINE_VOSK or not self.settings.corrections
+                or not self._quality_available()):
             # offline mode: polish punctuation/caps ourselves, synchronously.
-            # The final text may still carry the wake + command words at its
-            # head (this segment is where the session began) — strip them.
+            # The final text may still carry the command word at its head
+            # (this segment is where the session began) — strip it. Also taken
+            # when the quality engine cannot run at all (faster-whisper not
+            # installed) so the text still gets punctuation.
             headless = strip_session_head(
-                final_text, self.settings.wake_word_list,
-                self.settings.start_word, typed_first) if final_text else ""
+                final_text, self.settings.start_word,
+                typed_first) if final_text else ""
             pretty = apply_spoken_punctuation(capitalize_sentences(headless)) if headless else ""
             if pretty and pretty != typed_text:
                 if typed > 0:
@@ -561,9 +577,9 @@ class DictationEngine:
 
         self.last_seg_chars = typed
         if seg_pcm is not None and len(seg_pcm) >= TARGET_SR * MIN_SEGMENT_SECS:
-            # `first` + `typed_first` let the correction drop the wake and
-            # command words the quality engine re-hears at the segment's head
-            # while keeping genuinely dictated words that merely look similar.
+            # `first` + `typed_first` let the correction drop the command word
+            # the quality engine re-hears at the segment's head while keeping
+            # genuinely dictated words that merely look similar.
             meta = {"first": was_first_segment, "typed_first": typed_first}
             self._submit_correction(seg_pcm, meta)
 
@@ -585,8 +601,7 @@ class DictationEngine:
         corrected = text.strip()
         if meta.get("first"):
             corrected = strip_session_head(
-                corrected, self.settings.wake_word_list,
-                self.settings.start_word, meta.get("typed_first") or "")
+                corrected, self.settings.start_word, meta.get("typed_first") or "")
         if meta.get("strip_leading"):
             corrected = strip_leading_word(corrected, meta["strip_leading"])
         if meta.get("strip_trailing"):
@@ -612,12 +627,11 @@ class DictationEngine:
         With finish=False (continuous dictation) the session stays in
         DICTATING: the next utterance is typed without the start word.
         """
-        # On the first segment the kept words still carry the wake and command
-        # words ("астра напиши … отправить") — drop them before typing.
+        # On the first segment the kept words still carry the command word
+        # ("напиши … отправить") — drop it before typing.
         if self.first_segment:
-            candidate = strip_wake_words(
-                " ".join(keep_words), self.settings.wake_word_list)
-            candidate = strip_leading_word(candidate, self.settings.start_word)
+            candidate = strip_leading_word(
+                " ".join(keep_words), self.settings.start_word)
             keep_words = candidate.split()
         self._type_delta(keep_words)
         if not self.seg_submitted and self.seg_audio:
@@ -698,13 +712,37 @@ class DictationEngine:
             if item is None:
                 break
             if item[0] == "warmup":
-                self._get_whisper().warm_up()
+                if self._prepare_quality():
+                    self._get_whisper().warm_up()
                 continue
             _kind, key, pcm = item
             text = None
-            try:
-                text = self.quality_transcribe(pcm, self.settings.language)
-            except Exception as exc:
-                log.warning("quality correction failed: %s", exc)
-                self._whisper = None  # reload on next job
+            if self._prepare_quality():
+                try:
+                    text = self.quality_transcribe(pcm, self.settings.language)
+                except Exception as exc:
+                    log.warning("quality correction failed: %s", exc)
+                    self._whisper = None  # reload on next job
             self._q.put(("correction", key, text))
+
+    def _prepare_quality(self) -> bool:
+        """Bring the quality engine up, installing faster-whisper if needed.
+
+        faster-whisper is not part of the core dependency set (its heavy
+        wheel chain used to take the whole install down with it), so the first
+        segment that wants a correction installs it here, in this worker
+        thread — minutes, while dictation keeps typing the Vosk draft. When
+        the install fails the flag flips once and the log stays clean instead
+        of repeating an ImportError per segment.
+        """
+        if self.cloud_engine() is not None:
+            return True
+        if self._whisper_unavailable:
+            return False
+        if deps.ensure_whisper():
+            return True
+        self._whisper_unavailable = True
+        self._log_vosk_failure_once(
+            "faster-whisper unavailable (dependency install failed) — "
+            "dictation continues with Vosk only, segments are not refined")
+        return False

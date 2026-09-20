@@ -60,14 +60,15 @@ def test_settings_yandex_fields():
     assert s.engine == ENGINE_YANDEX
     assert s.yandex_api_key == "AQVN9"
     assert s.yandex_configured
-    assert s.wake_word_list == ["астра", "окей астра"]
+    # wake words were removed in 1.1.0; a saved config that still carries the
+    # key must not break parsing and must not resurrect the feature
+    assert not hasattr(s, "wake_word_list")
 
 
 def test_settings_yandex_without_key_falls_back_clean():
     s = Settings.from_config({"engine": "yandex"})
     assert s.engine == ENGINE_YANDEX
     assert not s.yandex_configured
-    assert s.wake_word_list == ["астра"]
 
 
 def test_settings_default_engine_is_whisper():

@@ -1,8 +1,17 @@
+# Runtime core: everything the plugin needs to reach Astra and dictate with
+# Vosk. Deliberately light and wide-pinned: Astra installs it as ONE flat set
+# from requirements.lock, so a single unresolvable pin (no wheel for the user's
+# Python, an old interpreter, a broken download) used to leave the plugin
+# without astra_plugin_sdk — it then died at import time with
+# ModuleNotFoundError and never reached its own self-healing code.
+# faster-whisper (the ctranslate2/av/onnxruntime chain, ~200 MB) is no longer
+# here: src/deps.py installs it on demand when the whisper engine is used, and
+# dictation runs Vosk-only without it.
 astra-plugin-sdk>=0.6,<0.7
 grpcio>=1.60.0
-grpcio-tools>=1.60.0
 protobuf>=4.25.0
-numpy>=1.26
+numpy>=1.24
 sounddevice>=0.4.6
 vosk>=0.3.45
-faster-whisper>=1.0
+websockets>=12
+requests>=2.28

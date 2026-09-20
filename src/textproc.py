@@ -50,30 +50,6 @@ def similar(spoken: str, target: str, threshold: float = 0.7) -> bool:
     return (1.0 - dist / max(len(a), len(b))) >= threshold
 
 
-def strip_wake_words(text: str, wake_words: list[str], max_strips: int = 2) -> str:
-    """Drop leading wake phrases ("астра", "окей астра"…) from a hypothesis.
-
-    Astra's wake word precedes the command word when the user addresses the
-    assistant ("Астра напиши…"), so it must not break command matching.
-    Fuzzy, longest phrases first, at most `max_strips` in a row.
-    """
-    words = (text or "").split()
-    phrases = sorted((w for w in wake_words if w), key=len, reverse=True)
-    for _ in range(max_strips):
-        stripped = False
-        for phrase in phrases:
-            n = len(phrase.split())
-            if len(words) < n:
-                continue
-            if similar(" ".join(words[:n]), phrase, 0.75):
-                words = words[n:]
-                stripped = True
-                break
-        if not stripped or not words:
-            break
-    return " ".join(words)
-
-
 def match_start(partial: str, start_word: str, threshold: float = 0.7):
     """Does a partial hypothesis begin with (something like) the start word?
 
@@ -116,15 +92,14 @@ def strip_leading_word(text: str, word: str, threshold: float = 0.7) -> str:
     return text
 
 
-def strip_session_head(text: str, wake_words: list[str], start_word: str,
-                       typed_first: str = "") -> str:
-    """Remove wake + command words from the head of a corrected segment text.
+def strip_session_head(text: str, start_word: str, typed_first: str = "") -> str:
+    """Remove the command word from the head of a corrected segment text.
 
-    The quality engine re-transcribes audio that begins with the wake and
-    command words ("астра напиши …"), so its text often starts with them even
-    though they were never typed. `typed_first` is the first word Vosk typed
-    from this segment: when the correction starts with the *same* word, the
-    head is legitimate dictation (the user really said "написал…") and is kept.
+    The quality engine re-transcribes audio that begins with the command word
+    ("напиши …"), so its text often starts with it even though the plugin
+    never typed it. `typed_first` is the first word Vosk typed from this
+    segment: when the correction starts with the *same* word, the head is
+    legitimate dictation (the user really said "написал…") and is kept.
     """
     words = (text or "").split()
     if not words:
@@ -132,9 +107,7 @@ def strip_session_head(text: str, wake_words: list[str], start_word: str,
     typed_first = (typed_first or "").strip()
     if typed_first and similar(words[0], typed_first, 0.75):
         return text
-    stripped = strip_wake_words(text, wake_words)
-    stripped = strip_leading_word(stripped, start_word)
-    return stripped
+    return strip_leading_word(text, start_word)
 
 
 def strip_trailing_word(text: str, word: str, threshold: float = 0.72) -> str:

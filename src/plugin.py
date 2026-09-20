@@ -13,15 +13,35 @@ from the Astra settings page rendered out of `[config]` in plugin.toml.
 import asyncio
 import json
 import logging
+import sys
 from pathlib import Path
 
-from astra_plugin_sdk import Plugin, tool
-from astra_plugin_sdk.types import SttLoadState, SttLoadStatus
-
 from . import deps
-from .dictation import DictationEngine
-from .settings import ENGINE_WHISPER, Settings
-from .stt_provider import SttProvider
+
+# Bootstrap BEFORE importing the SDK or anything else: Astra installs the
+# plugin's dependencies from requirements.lock as one flat all-or-nothing set,
+# so when a single pin fails to install (no wheel for the user's Python, a
+# broken download) astra_plugin_sdk is missing too. This module used to die
+# right there with "ModuleNotFoundError: No module named 'astra_plugin_sdk'"
+# before any of its own recovery code could run, and Astra restarted it into
+# the same traceback. deps.ensure_runtime() finishes the install in the
+# interpreter that runs us; if it cannot, one actionable line beats a crash
+# loop.
+if not deps.ensure_runtime():
+    _req = Path(__file__).resolve().parent.parent / "requirements.txt"
+    sys.stderr.write(
+        "voice-text-input: Python dependencies are missing and could not be "
+        "installed automatically.\n"
+        f'Fix it with:  "{sys.executable}" -m pip install -r "{_req}"\n'
+        "then restart Astra.\n")
+    sys.exit(1)
+
+from astra_plugin_sdk import Plugin, tool  # noqa: E402
+from astra_plugin_sdk.types import SttLoadState, SttLoadStatus  # noqa: E402
+
+from .dictation import DictationEngine  # noqa: E402
+from .settings import ENGINE_WHISPER, Settings  # noqa: E402
+from .stt_provider import SttProvider  # noqa: E402
 
 log = logging.getLogger("voice-text-input")
 
@@ -92,11 +112,15 @@ class VoiceTextInput(Plugin):
         # The daemon's model catalog path does not apply here: models live in
         # the plugin's models/ dir. Just warm the active engine so the first
         # utterance is not slow. Self-heal deps first: Astra's runtime python
-        # may miss vosk/faster-whisper (partial install) — this finishes it.
+        # may miss vosk/websockets (partial install) — this finishes it.
+        # faster-whisper is no longer part of the core install (heavy wheels,
+        # it used to take the whole dependency set down with it), so it is
+        # installed here on demand when the whisper engine is the chosen one.
         # to_thread: on a fresh catalog install this may download the vosk
         # model (~45 MB) or load whisper — minutes, must not block the loop.
         await asyncio.to_thread(deps.ensure_core_deps)
         if self._engine.settings.engine == ENGINE_WHISPER:
+            await asyncio.to_thread(deps.ensure_whisper)
             await asyncio.to_thread(self._engine.whisper_engine().warm_up)
         else:
             await asyncio.to_thread(self._engine.vosk_listener)

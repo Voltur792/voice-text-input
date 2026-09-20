@@ -5,11 +5,12 @@ the orchestrator methods touch are set. type_text/backspace/press_enter are
 monkeypatched, so the tests assert on what would appear in the target window.
 
 Regression tests here cover the "напиши gets typed" bug: the first segment's
-hypotheses (partials AND the final) all carry the wake/command words, so the
-head must be stripped on every hypothesis, not just once.
+hypotheses (partials AND the final) all carry the command word, so the head
+must be stripped on every hypothesis, not just once.
 """
 
 import queue
+import threading
 
 import pytest
 
@@ -32,6 +33,16 @@ def bare_engine(engine_name: str = "faster-whisper") -> DictationEngine:
     eng.first_segment = True
     eng.seg_submitted = False
     eng.pending_corr = None
+    eng._whisper_unavailable = False
+    eng._status = "listening"
+    eng._last_vosk_err = ""
+    eng._last_vosk_err_at = 0.0
+    eng._yandex = None
+    eng._yandex_lock = threading.Lock()
+    eng._openai = None
+    eng._openai_lock = threading.Lock()
+    eng._google = None
+    eng._google_lock = threading.Lock()
     eng._q = queue.Queue()
     eng._whisper_q = queue.Queue()
     return eng
@@ -75,13 +86,15 @@ def test_first_segment_final_does_not_retype_start_word(keys):
     assert rendered(typed) == "привет"
 
 
-def test_first_segment_final_with_wake_word(keys):
+def test_addressed_to_astra_does_not_start_dictation(keys):
+    """1.1.0: no wake words. "Астра напиши…" is the assistant's cue — the
+    plugin stays silent (and Astra keeps answering its users). Used to start
+    dictation after cutting the wake word off."""
     typed, _ = keys
     eng = bare_engine()
     eng._try_start("астра напиши")
-    eng._on_partial("астра напиши привет")
-    eng._on_final("астра напиши привет")
-    assert rendered(typed) == "привет"
+    assert eng.state == IDLE
+    assert rendered(typed) == ""
 
 
 def test_send_from_first_segment_strips_head(keys):
@@ -223,3 +236,47 @@ def test_short_segment_no_correction(keys):
     eng._on_final("напиши привет")
     assert rendered(typed) == "привет"
     assert eng._whisper_q.empty()
+
+
+# ── faster-whisper is optional: dictation must survive without it ─────────
+
+
+def test_prepare_quality_marks_unavailable_after_a_failed_install(monkeypatch):
+    """One failed pip attempt and the flag stays up — no retry per segment."""
+    eng = bare_engine()
+    calls = []
+
+    def fake_ensure():
+        calls.append(1)
+        return False
+
+    monkeypatch.setattr(dictation.deps, "ensure_whisper", fake_ensure)
+    assert eng._prepare_quality() is False
+    assert eng._prepare_quality() is False
+    assert eng._whisper_unavailable is True
+    assert len(calls) == 1
+
+
+def test_prepare_quality_cloud_engine_needs_no_whisper(monkeypatch):
+    """A configured cloud engine is the quality engine — no whisper install."""
+    eng = bare_engine()
+    eng.settings = Settings.from_config({"engine": "yandex", "yandex_api_key": "AQVN1"})
+    monkeypatch.setattr(dictation.deps, "ensure_whisper",
+                        lambda: (_ for _ in ()).throw(AssertionError("must not install")))
+    assert eng._prepare_quality() is True
+    assert eng._whisper_unavailable is False
+
+
+def test_whisper_unavailable_polishes_offline_instead_of_queueing(keys):
+    """No quality engine → the Vosk text gets the offline punctuation polish
+    and nothing is queued (no ImportError per segment in the log)."""
+    import numpy as np
+
+    typed, _ = keys
+    eng = bare_engine()
+    eng._whisper_unavailable = True
+    eng._try_start("напиши")
+    eng.seg_audio.append(np.zeros(16000, dtype="int16"))  # 1 s, would qualify
+    eng._on_final("напиши привет точка")
+    assert eng._whisper_q.empty()
+    assert rendered(typed) == "Привет."

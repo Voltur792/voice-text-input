@@ -72,7 +72,6 @@ class Settings:
     finish_word: str = "закончить"
     cancel_word: str = "отмена"
     new_line_word: str = "с новой строки"
-    wake_words: str = "астра"
     engine: str = ENGINE_WHISPER
     whisper_model: str = "small"
     yandex_api_key: str = ""
@@ -85,11 +84,6 @@ class Settings:
     corrections: bool = True
     language: str = "ru"
     send_wait_secs: float = 1.2
-
-    @property
-    def wake_word_list(self) -> list[str]:
-        """Parsed wake phrases; empty strings dropped."""
-        return [p.strip().lower() for p in (self.wake_words or "").split(",") if p.strip()]
 
     @property
     def yandex_configured(self) -> bool:
@@ -109,8 +103,10 @@ class Settings:
             cancel_word=_as_text(config.get("cancel_word"), "отмена"),
             new_line_word=(config.get("new_line_word") if isinstance(config.get("new_line_word"), str)
                            else "с новой строки"),
-            wake_words=(config.get("wake_words") if isinstance(config.get("wake_words"), str)
-                        else "астра"),
+            # "wake_words" was removed in 1.1.0 (its presence pushed users to
+            # switch off Astra's own phrase activation, after which Astra
+            # stopped answering them). Saved configs still deliver the key —
+            # it is simply ignored here.
             engine=_as_choice(config.get("engine"), ENGINES, ENGINE_WHISPER),
             whisper_model=_as_choice(config.get("whisper_model"), WHISPER_MODELS, "small"),
             yandex_api_key=(config.get("yandex_api_key").strip()
