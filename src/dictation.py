@@ -280,12 +280,21 @@ class DictationEngine:
             kind = ev[0]
             if kind == "quit":
                 break
-            if kind == "settings":
-                self._on_settings(ev[1])
-            elif kind == "audio":
-                self._on_audio(ev[1])
-            elif kind == "correction":
-                self._on_correction(ev[1], ev[2])
+            try:
+                if kind == "settings":
+                    self._on_settings(ev[1])
+                elif kind == "audio":
+                    self._on_audio(ev[1])
+                elif kind == "correction":
+                    self._on_correction(ev[1], ev[2])
+            except RuntimeError as exc:
+                self._stop_mic()
+                self._end_session()
+                self._status = str(exc)
+                log.error("Dictation stopped: %s", exc)
+                # A settings update is required after permissions/dependencies
+                # change. Do not retry an uncertain text insertion automatically.
+                self.settings.enabled = False
         self._teardown()
         log.info("dictation engine stopped")
 

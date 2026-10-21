@@ -225,7 +225,7 @@ def test_vosk_load_path_no_short_names_copies_to_programdata(tmp_path, monkeypat
     monkeypatch.setattr(models, "_is_windows", lambda: True)
     monkeypatch.setattr(models, "_windows_short_path", lambda p: None)
     monkeypatch.setattr(models, "_programdata_dir", lambda: tmp_path / "PD")
-    src = tmp_path / "src" / "vosk-model-small-ru-0.22"
+    src = tmp_path / "исходник" / "vosk-model-small-ru-0.22"
     _make_model(src)
     target = tmp_path / "PD" / "voice-text-input" / "models" / "vosk-model-small-ru-0.22"
     assert models.vosk_load_path(src) == target

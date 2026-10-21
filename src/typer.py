@@ -4,8 +4,8 @@ Uses KEYEVENTF_UNICODE, which injects characters by code point and therefore
 works regardless of the active keyboard layout (Russian text lands correctly
 even with an English layout selected). No third-party dependency: ctypes only.
 
-Everything is a no-op with a logged warning on non-Windows platforms, so the
-test suite and a Linux Astra can import this module freely.
+Linux and macOS delegate to posix_typer. An unavailable input backend raises
+a setup error rather than silently pretending that text was inserted.
 """
 
 import logging
@@ -118,7 +118,8 @@ if IS_WINDOWS:
 def type_text(text: str) -> None:
     """Type `text` into the focused window, character by character."""
     if not IS_WINDOWS:
-        log.warning("typing requested on non-Windows platform: ignored")
+        from .posix_typer import type_text as posix_type
+        posix_type(text)
         return
     if text:
         _type_unicode(text)
@@ -127,6 +128,8 @@ def type_text(text: str) -> None:
 def press_enter(ctrl: bool = False) -> None:
     """Press Enter (or Ctrl+Enter) in the focused window."""
     if not IS_WINDOWS:
+        from .posix_typer import key
+        key("Return", ctrl=ctrl)
         return
     events: list[INPUT] = []
     if ctrl:
@@ -141,6 +144,8 @@ def press_enter(ctrl: bool = False) -> None:
 def press_shift_enter() -> None:
     """Shift+Enter: newline in the focused window without sending (messengers)."""
     if not IS_WINDOWS:
+        from .posix_typer import key
+        key("Return", shift=True)
         return
     _send([
         _vk_event(VK_SHIFT, False),
@@ -152,7 +157,11 @@ def press_shift_enter() -> None:
 
 def backspace(count: int) -> None:
     """Send `count` Backspace presses (erases `count` characters backwards)."""
-    if not IS_WINDOWS or count <= 0:
+    if count <= 0:
+        return
+    if not IS_WINDOWS:
+        from .posix_typer import key
+        key("BackSpace", count=count)
         return
     events: list[INPUT] = []
     for _ in range(min(count, 10_000)):

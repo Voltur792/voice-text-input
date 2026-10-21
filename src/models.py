@@ -42,6 +42,9 @@ def shared_models_dir() -> Path | None:
     """Per-user model storage that survives plugin updates, or None."""
     appdata = os.environ.get("APPDATA")
     if not appdata:
+        from .platform_support import user_data
+        if __import__("sys").platform != "win32":
+            return user_data() / "voice-text-input/models"
         return None
     return Path(appdata) / "voice-text-input" / "models"
 
