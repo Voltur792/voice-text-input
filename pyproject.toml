@@ -9,7 +9,8 @@ dependencies = [
     "protobuf>=4.25.0",
     "numpy>=1.26",
     "sounddevice>=0.4.6",
-    "vosk>=0.3.45",
+    "vosk>=0.3.45; sys_platform != 'darwin'",
+    "vosk==0.3.44; sys_platform == 'darwin'",
     "faster-whisper>=1.0",
 ]
 
